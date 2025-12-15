@@ -1,0 +1,542 @@
+import React, { useState, useEffect } from 'react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Area, AreaChart } from 'recharts';
+import { TrendingUp, TrendingDown, Activity, BarChart3, Settings, User, Clock, DollarSign, Target, AlertCircle } from 'lucide-react';
+
+const PricePredictionPlatform = () => {
+  const [selectedAsset, setSelectedAsset] = useState('XAU/USD');
+  const [balance, setBalance] = useState(50000);
+  const [positions, setPositions] = useState([]);
+  const [closedTrades, setClosedTrades] = useState([]);
+  const [isLive, setIsLive] = useState(true);
+  const [orderSize, setOrderSize] = useState(1);
+  const [chartTimeframe, setChartTimeframe] = useState('1H');
+  const [showNotification, setShowNotification] = useState(null);
+
+  // Trading assets with precise market data
+  const tradingAssets = {
+    'XAU/USD': { 
+      name: 'Gold', 
+      price: 4213.45, 
+      icon: '🥇',
+      support: 4205.20,
+      resistance: 4225.80,
+      lotSize: 100,
+      decimals: 2,
+      spread: 0.30,
+      volatility: 5.2
+    },
+    'EUR/USD': { 
+      name: 'Euro/Dollar', 
+      price: 1.08547, 
+      icon: '💶',
+      support: 1.08320,
+      resistance: 1.08780,
+      lotSize: 100000,
+      decimals: 5,
+      spread: 0.00008,
+      volatility: 0.0015
+    },
+    'GBP/USD': { 
+      name: 'Pound/Dollar', 
+      price: 1.26534, 
+      icon: '💷',
+      support: 1.26210,
+      resistance: 1.26850,
+      lotSize: 100000,
+      decimals: 5,
+      spread: 0.00012,
+      volatility: 0.0018
+    },
+    'US100': { 
+      name: 'Nasdaq 100', 
+      price: 21845.60, 
+      icon: '📊',
+      support: 21750.00,
+      resistance: 21950.00,
+      lotSize: 1,
+      decimals: 2,
+      spread: 2.50,
+      volatility: 45.0
+    },
+    'XAG/USD': { 
+      name: 'Silver', 
+      price: 31.245, 
+      icon: '⚪',
+      support: 31.050,
+      resistance: 31.480,
+      lotSize: 5000,
+      decimals: 3,
+      spread: 0.025,
+      volatility: 0.35
+    }
+  };
+
+  const [prices, setPrices] = useState(
+    Object.keys(tradingAssets).reduce((acc, key) => {
+      acc[key] = tradingAssets[key].price;
+      return acc;
+    }, {})
+  );
+
+  const [chartData, setChartData] = useState([]);
+
+  // Initialize chart data
+  useEffect(() => {
+    generateChartData(selectedAsset);
+  }, [selectedAsset]);
+
+  // Generate realistic chart data
+  const generateChartData = (asset) => {
+    const data = [];
+    const config = tradingAssets[asset];
+    let price = config.price;
+    
+    for (let i = 0; i < 50; i++) {
+      const change = (Math.random() - 0.5) * config.volatility;
+      price = price + change;
+      
+      // Keep price within support/resistance range mostly
+      if (price < config.support) price = config.support + Math.random() * config.volatility;
+      if (price > config.resistance) price = config.resistance - Math.random() * config.volatility;
+      
+      data.push({
+        time: i,
+        price: parseFloat(price.toFixed(config.decimals)),
+        timestamp: new Date(Date.now() - (50 - i) * 60000).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+      });
+    }
+    
+    setChartData(data);
+  };
+
+  // Live price updates
+  useEffect(() => {
+    if (!isLive) return;
+
+    const interval = setInterval(() => {
+      setPrices(prev => {
+        const newPrices = { ...prev };
+        Object.keys(tradingAssets).forEach(asset => {
+          const config = tradingAssets[asset];
+          const change = (Math.random() - 0.5) * config.volatility * 0.3;
+          newPrices[asset] = parseFloat((newPrices[asset] + change).toFixed(config.decimals));
+        });
+        return newPrices;
+      });
+
+      // Update chart for selected asset
+      setChartData(prevData => {
+        const config = tradingAssets[selectedAsset];
+        const lastPrice = prevData[prevData.length - 1]?.price || config.price;
+        const change = (Math.random() - 0.5) * config.volatility * 0.5;
+        const newPrice = parseFloat((lastPrice + change).toFixed(config.decimals));
+        
+        const newPoint = {
+          time: prevData.length,
+          price: newPrice,
+          timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+        };
+        
+        return [...prevData.slice(-49), newPoint];
+      });
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [isLive, selectedAsset]);
+
+  // Calculate P&L for open positions
+  useEffect(() => {
+    if (positions.length > 0) {
+      setPositions(prev => prev.map(pos => {
+        const currentPrice = prices[pos.asset];
+        const priceDiff = pos.type === 'BUY' 
+          ? currentPrice - pos.entryPrice 
+          : pos.entryPrice - currentPrice;
+        const pnl = priceDiff * pos.lotSize * pos.units;
+        return { ...pos, currentPrice, pnl };
+      }));
+    }
+  }, [prices]);
+
+  const showNotificationMessage = (message, type = 'success') => {
+    setShowNotification({ message, type });
+    setTimeout(() => setShowNotification(null), 3000);
+  };
+
+  const openPosition = (type) => {
+    const config = tradingAssets[selectedAsset];
+    const currentPrice = prices[selectedAsset];
+    const executionPrice = type === 'BUY' 
+      ? currentPrice + config.spread 
+      : currentPrice - config.spread;
+
+    const newPosition = {
+      id: Date.now(),
+      asset: selectedAsset,
+      type: type,
+      entryPrice: parseFloat(executionPrice.toFixed(config.decimals)),
+      currentPrice: currentPrice,
+      units: orderSize,
+      lotSize: config.lotSize,
+      openTime: new Date().toLocaleTimeString(),
+      pnl: 0
+    };
+
+    setPositions([...positions, newPosition]);
+    showNotificationMessage(`${type} order opened for ${selectedAsset} at ${executionPrice.toFixed(config.decimals)}`);
+  };
+
+  const closePosition = (positionId) => {
+    const position = positions.find(p => p.id === positionId);
+    if (!position) return;
+
+    const closedTrade = {
+      ...position,
+      closeTime: new Date().toLocaleTimeString(),
+      exitPrice: position.currentPrice,
+      finalPnl: position.pnl
+    };
+
+    setClosedTrades([closedTrade, ...closedTrades.slice(0, 9)]);
+    setBalance(prev => prev + position.pnl);
+    setPositions(positions.filter(p => p.id !== positionId));
+    
+    const profitLoss = position.pnl >= 0 ? 'profit' : 'loss';
+    showNotificationMessage(
+      `Position closed with ${profitLoss}: $${Math.abs(position.pnl).toFixed(2)}`,
+      position.pnl >= 0 ? 'success' : 'error'
+    );
+  };
+
+  const totalPnL = positions.reduce((sum, pos) => sum + pos.pnl, 0);
+  const config = tradingAssets[selectedAsset];
+  const currentPrice = prices[selectedAsset];
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900">
+      {/* Notification */}
+      {showNotification && (
+        <div className={`fixed top-4 right-4 z-50 px-6 py-3 rounded-lg shadow-2xl animate-fade-in ${
+          showNotification.type === 'success' ? 'bg-green-600' : 'bg-red-600'
+        } text-white font-semibold`}>
+          {showNotification.message}
+        </div>
+      )}
+
+      {/* Header */}
+      <header className="bg-slate-800/95 backdrop-blur-sm shadow-2xl border-b border-blue-500/30 sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-4 py-4">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="bg-gradient-to-r from-blue-500 to-purple-600 p-2 rounded-lg">
+                <Activity className="text-white" size={28} />
+              </div>
+              <div>
+                <h1 className="text-2xl md:text-3xl font-bold text-white tracking-tight">
+                  PRICE PREDICTION
+                </h1>
+                <p className="text-blue-300 text-xs md:text-sm">Advanced Trading Platform</p>
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-4">
+              <div className="bg-slate-700/50 px-4 py-2 rounded-lg">
+                <p className="text-gray-400 text-xs">Balance</p>
+                <p className={`text-xl font-bold ${balance >= 50000 ? 'text-green-400' : 'text-red-400'}`}>
+                  ${balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+              </div>
+              <div className="bg-slate-700/50 px-4 py-2 rounded-lg">
+                <p className="text-gray-400 text-xs">Total P&L</p>
+                <p className={`text-xl font-bold ${totalPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {totalPnL >= 0 ? '+' : ''}{totalPnL.toFixed(2)}
+                </p>
+              </div>
+              <button className="bg-slate-700 hover:bg-slate-600 p-3 rounded-lg transition-all">
+                <User className="text-gray-300" size={20} />
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div className="max-w-7xl mx-auto p-4 gap-4 grid grid-cols-1 lg:grid-cols-12">
+        {/* Assets Sidebar */}
+        <div className="lg:col-span-3 space-y-4">
+          <div className="bg-slate-800/95 backdrop-blur-sm rounded-xl shadow-2xl p-4 border border-slate-700">
+            <h2 className="text-white font-bold text-lg mb-4 flex items-center gap-2">
+              <BarChart3 size={20} className="text-blue-400" />
+              Trading Assets
+            </h2>
+            <div className="space-y-2">
+              {Object.entries(tradingAssets).map(([key, asset]) => {
+                const price = prices[key];
+                const isSelected = selectedAsset === key;
+                return (
+                  <button
+                    key={key}
+                    onClick={() => setSelectedAsset(key)}
+                    className={`w-full p-3 rounded-lg transition-all ${
+                      isSelected 
+                        ? 'bg-gradient-to-r from-blue-600 to-purple-600 shadow-lg transform scale-105' 
+                        : 'bg-slate-700/50 hover:bg-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-2xl">{asset.icon}</span>
+                        <div className="text-left">
+                          <p className="text-white font-semibold text-sm">{key}</p>
+                          <p className="text-gray-400 text-xs">{asset.name}</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-white font-bold text-sm">
+                          {price.toFixed(asset.decimals)}
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Order Panel */}
+          <div className="bg-slate-800/95 backdrop-blur-sm rounded-xl shadow-2xl p-4 border border-slate-700">
+            <h2 className="text-white font-bold text-lg mb-4 flex items-center gap-2">
+              <Target size={20} className="text-purple-400" />
+              Quick Trade
+            </h2>
+            
+            <div className="mb-4">
+              <label className="text-gray-400 text-sm block mb-2">Order Size (Lots)</label>
+              <input
+                type="number"
+                value={orderSize}
+                onChange={(e) => setOrderSize(Math.max(0.01, parseFloat(e.target.value) || 0.01))}
+                step="0.01"
+                min="0.01"
+                className="w-full bg-slate-700 text-white px-4 py-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <button
+                onClick={() => openPosition('BUY')}
+                className="w-full bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white font-bold py-4 rounded-lg transition-all transform hover:scale-105 shadow-lg flex items-center justify-center gap-2"
+              >
+                <TrendingUp size={20} />
+                BUY {currentPrice.toFixed(config.decimals)}
+              </button>
+              <button
+                onClick={() => openPosition('SELL')}
+                className="w-full bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white font-bold py-4 rounded-lg transition-all transform hover:scale-105 shadow-lg flex items-center justify-center gap-2"
+              >
+                <TrendingDown size={20} />
+                SELL {currentPrice.toFixed(config.decimals)}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Main Chart Area */}
+        <div className="lg:col-span-9 space-y-4">
+          {/* Chart Header */}
+          <div className="bg-slate-800/95 backdrop-blur-sm rounded-xl shadow-2xl p-4 border border-slate-700">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-3xl">{config.icon}</span>
+                  <div>
+                    <h2 className="text-white font-bold text-2xl">{selectedAsset}</h2>
+                    <p className="text-gray-400 text-sm">{config.name}</p>
+                  </div>
+                </div>
+                <div className="flex items-baseline gap-2">
+                  <p className="text-white text-3xl font-bold">
+                    {currentPrice.toFixed(config.decimals)}
+                  </p>
+                  <span className={`text-sm font-semibold ${Math.random() > 0.5 ? 'text-green-400' : 'text-red-400'}`}>
+                    {Math.random() > 0.5 ? '+' : '-'}{(Math.random() * 0.5).toFixed(2)}%
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-green-500/10 border border-green-500/30 rounded-lg px-4 py-2">
+                  <p className="text-green-400 text-xs font-semibold mb-1">SUPPORT</p>
+                  <p className="text-white font-bold">{config.support.toFixed(config.decimals)}</p>
+                </div>
+                <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-2">
+                  <p className="text-red-400 text-xs font-semibold mb-1">RESISTANCE</p>
+                  <p className="text-white font-bold">{config.resistance.toFixed(config.decimals)}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Chart */}
+          <div className="bg-slate-800/95 backdrop-blur-sm rounded-xl shadow-2xl p-4 border border-slate-700">
+            <div className="flex justify-between items-center mb-4">
+              <div className="flex gap-2">
+                {['1M', '5M', '15M', '1H', '4H', '1D'].map(tf => (
+                  <button
+                    key={tf}
+                    onClick={() => setChartTimeframe(tf)}
+                    className={`px-3 py-1 rounded text-sm font-semibold transition-all ${
+                      chartTimeframe === tf 
+                        ? 'bg-blue-600 text-white' 
+                        : 'bg-slate-700 text-gray-300 hover:bg-slate-600'
+                    }`}
+                  >
+                    {tf}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => setIsLive(!isLive)}
+                className={`px-4 py-2 rounded-lg font-semibold transition-all ${
+                  isLive 
+                    ? 'bg-green-600 hover:bg-green-700 text-white' 
+                    : 'bg-gray-600 hover:bg-gray-700 text-white'
+                }`}
+              >
+                {isLive ? '● LIVE' : '○ PAUSED'}
+              </button>
+            </div>
+
+            <div style={{ height: '400px' }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={chartData}>
+                  <defs>
+                    <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                  <XAxis 
+                    dataKey="timestamp" 
+                    stroke="#94a3b8"
+                    tick={{ fill: '#94a3b8', fontSize: 12 }}
+                  />
+                  <YAxis 
+                    domain={['auto', 'auto']}
+                    stroke="#94a3b8"
+                    tick={{ fill: '#94a3b8', fontSize: 12 }}
+                    tickFormatter={(value) => value.toFixed(config.decimals)}
+                  />
+                  <Tooltip 
+                    contentStyle={{ 
+                      backgroundColor: '#1e293b', 
+                      border: '1px solid #3b82f6',
+                      borderRadius: '8px',
+                      color: '#fff'
+                    }}
+                    formatter={(value) => [value.toFixed(config.decimals), 'Price']}
+                  />
+                  <Area 
+                    type="monotone" 
+                    dataKey="price" 
+                    stroke="#3b82f6" 
+                    strokeWidth={2}
+                    fill="url(#colorPrice)"
+                  />
+                  <ReferenceLine 
+                    y={config.support} 
+                    stroke="#10b981" 
+                    strokeDasharray="5 5"
+                    strokeWidth={2}
+                    label={{ value: 'Support', fill: '#10b981', fontSize: 12 }}
+                  />
+                  <ReferenceLine 
+                    y={config.resistance} 
+                    stroke="#ef4444" 
+                    strokeDasharray="5 5"
+                    strokeWidth={2}
+                    label={{ value: 'Resistance', fill: '#ef4444', fontSize: 12 }}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          {/* Positions */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="bg-slate-800/95 backdrop-blur-sm rounded-xl shadow-2xl p-4 border border-slate-700">
+              <h3 className="text-white font-bold text-lg mb-3 flex items-center gap-2">
+                <Activity size={18} className="text-blue-400" />
+                Open Positions ({positions.length})
+              </h3>
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {positions.length === 0 ? (
+                  <p className="text-gray-400 text-sm text-center py-8">No open positions</p>
+                ) : (
+                  positions.map(pos => (
+                    <div key={pos.id} className="bg-slate-700/50 rounded-lg p-3 border border-slate-600">
+                      <div className="flex justify-between items-start mb-2">
+                        <div>
+                          <p className={`font-bold ${pos.type === 'BUY' ? 'text-green-400' : 'text-red-400'}`}>
+                            {pos.type} {pos.asset}
+                          </p>
+                          <p className="text-gray-400 text-xs">
+                            Entry: {pos.entryPrice} | Size: {pos.units} lots
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className={`font-bold text-lg ${pos.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            {pos.pnl >= 0 ? '+' : ''}{pos.pnl.toFixed(2)}
+                          </p>
+                          <p className="text-gray-400 text-xs">{pos.openTime}</p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => closePosition(pos.id)}
+                        className="w-full bg-yellow-600 hover:bg-yellow-700 text-white py-2 rounded transition-all font-semibold text-sm"
+                      >
+                        Close Position
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="bg-slate-800/95 backdrop-blur-sm rounded-xl shadow-2xl p-4 border border-slate-700">
+              <h3 className="text-white font-bold text-lg mb-3 flex items-center gap-2">
+                <Clock size={18} className="text-purple-400" />
+                Trade History
+              </h3>
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {closedTrades.length === 0 ? (
+                  <p className="text-gray-400 text-sm text-center py-8">No closed trades</p>
+                ) : (
+                  closedTrades.map((trade, idx) => (
+                    <div key={idx} className="bg-slate-700/50 rounded-lg p-3 border border-slate-600">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <p className={`font-semibold text-sm ${trade.type === 'BUY' ? 'text-green-400' : 'text-red-400'}`}>
+                            {trade.type} {trade.asset}
+                          </p>
+                          <p className="text-gray-400 text-xs">
+                            {trade.entryPrice} → {trade.exitPrice}
+                          </p>
+                        </div>
+                        <p className={`font-bold ${trade.finalPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          {trade.finalPnl >= 0 ? '+' : ''}{trade.finalPnl.toFixed(2)}
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default PricePredictionPlatform;
